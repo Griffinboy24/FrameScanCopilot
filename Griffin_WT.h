@@ -52,7 +52,8 @@ namespace project
             realLen(0),
             padLen(0),
             sampleLength(0),
-            cycleLen(0)
+            cycleLen(0),
+            frameLength(0) // P7b7f
         {
         }
 
@@ -67,6 +68,7 @@ namespace project
             realLen = frames * frameLen;   // full buffer length
             padLen = padCycles * frameLen;// FIR context
             sampleLength = padLen + realLen;   // total buffer
+            frameLength = frameLen * 3; // Pbe45
 
             sampleBuffer.resize(sampleLength);
 
@@ -162,6 +164,13 @@ namespace project
                 rspl::Int64 wrapped = rel & (cycleLen - 1);
                 rspl::Int64 newInt = padLen + wrapped;
 
+                // handle frame changes and skip over padding
+                if (frameParam != 0)
+                {
+                    int frameIndex = frameParam - 1;
+                    newInt = padLen + frameIndex * frameLength;
+                }
+
                 resampler.set_playback_pos((newInt << 32) | frac);
 
                 resampler.interpolate_block(&L[i], 1);
@@ -188,6 +197,14 @@ namespace project
             else if constexpr (P == 1)
             {
                 frameParam = int(v);
+                // handle frame changes
+                if (frameParam != 0)
+                {
+                    int frameIndex = frameParam - 1;
+                    rspl::Int64 newInt = padLen + frameIndex * frameLength;
+                    rspl::Int64 pos = (newInt << 32);
+                    resampler.set_playback_pos(pos);
+                }
             }
             else if constexpr (P == 2)
             {
@@ -228,6 +245,7 @@ namespace project
         long               pitchBits;
         int                realLen, padLen, sampleLength;
         int                cycleLen;         // single-cycle length
+        int                frameLength;      // length of each frame including padding
         rspl::InterpPack   interpPack;
         rspl::MipMapFlt    mipMap;
         rspl::ResamplerFlt resampler;
