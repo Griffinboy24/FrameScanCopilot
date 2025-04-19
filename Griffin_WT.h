@@ -60,19 +60,20 @@ namespace project
         {
             constexpr int frames = 1000;
             constexpr int frameLen = 2048;
-            constexpr int numSaws = 2;
+            constexpr int numSaws = 1;
+            constexpr int numSines = 3;
             constexpr int padCycles = 1;
 
             cycleLen = frameLen;            // single-cycle length
-            realLen = frames * frameLen;   // full buffer length
+            realLen = (numSaws + numSines) * frameLen;   // full buffer length
             padLen = padCycles * frameLen;// FIR context
-            sampleLength = padLen + realLen;   // total buffer
+            sampleLength = (numSaws + numSines) * 3 * frameLen;   // total buffer
 
             sampleBuffer.resize(sampleLength);
 
             // build original data into temp
             std::vector<float> orig(realLen);
-            for (int f = 0; f < frames; ++f)
+            for (int f = 0; f < numSaws + numSines; ++f)
             {
                 float* dst = orig.data() + f * frameLen;
                 if (f < numSaws)
@@ -105,11 +106,24 @@ namespace project
             }
 
             // copy full real data after pad
-            std::memcpy(
-                sampleBuffer.data() + padLen,
-                orig.data(),
-                realLen * sizeof(float)
-            );
+            for (int f = 0; f < numSaws + numSines; ++f)
+            {
+                std::memcpy(
+                    sampleBuffer.data() + (padCycles + f * 3) * frameLen,
+                    orig.data() + f * frameLen,
+                    frameLen * sizeof(float)
+                );
+                std::memcpy(
+                    sampleBuffer.data() + (padCycles + f * 3 + 1) * frameLen,
+                    orig.data() + f * frameLen,
+                    frameLen * sizeof(float)
+                );
+                std::memcpy(
+                    sampleBuffer.data() + (padCycles + f * 3 + 2) * frameLen,
+                    orig.data() + f * frameLen,
+                    frameLen * sizeof(float)
+                );
+            }
 
             // initialize mipmap and resampler on full buffer
             mipMap.init_sample(
@@ -157,10 +171,12 @@ namespace project
                 rspl::Int64 intPos = pos >> 32;
                 rspl::Int64 frac = pos & 0xFFFFFFFF;
 
-                // wrap only over one cycle
+                // wrap over frame and padding
                 rspl::Int64 rel = intPos - padLen;
-                rspl::Int64 wrapped = rel & (cycleLen - 1);
-                rspl::Int64 newInt = padLen + wrapped;
+                rspl::Int64 frameIndex = rel / (3 * cycleLen);
+                rspl::Int64 frameOffset = rel % (3 * cycleLen);
+                rspl::Int64 wrapped = frameOffset % cycleLen;
+                rspl::Int64 newInt = padLen + frameIndex * 3 * cycleLen + cycleLen + wrapped;
 
                 resampler.set_playback_pos((newInt << 32) | frac);
 
@@ -188,6 +204,10 @@ namespace project
             else if constexpr (P == 1)
             {
                 frameParam = int(v);
+                rspl::Int64 newFrameStart = padLen + frameParam * 3 * cycleLen;
+                rspl::Int64 pos = resampler.get_playback_pos();
+                rspl::Int64 frac = pos & 0xFFFFFFFF;
+                resampler.set_playback_pos((newFrameStart << 32) | frac);
             }
             else if constexpr (P == 2)
             {
